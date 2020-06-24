@@ -39,3 +39,7 @@ interface TearDownEnvFunc {
 interface EnvHandle {
   close: TearDownEnvFunc
 }
+
+interface PageFinalPageGraph {
+  data: string
+}

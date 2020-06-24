@@ -43,14 +43,29 @@ const setupEnv = (args) => {
 const isNotHTMLPageGraphError = (error) => {
     return error.message.indexOf('No Page Graph for this Document') >= 0;
 };
-export const graphForUrl = (args, url) => __awaiter(void 0, void 0, void 0, function* () {
+export const graphsForUrl = (args, url) => __awaiter(void 0, void 0, void 0, function* () {
     const logger = getLogger(args);
     const { puppeteerArgs, pathForProfile, shouldClean } = puppeteerConfigForArgs(args);
     const envHandle = setupEnv(args);
-    let pageGraphText;
+    let pageGraphTexts;
+    const clients = [];
     try {
         logger.debug('Launching puppeteer with args: ', puppeteerArgs);
         const browser = yield puppeteerLib.launch(puppeteerArgs);
+        browser.on('targetcreated', (target /*TODO: type info for puppeteer?*/) => __awaiter(void 0, void 0, void 0, function* () {
+            if (target.type() === "page") {
+                const targetUrl = target.url();
+                const cdp = yield target.createCDPSession().catch((err) => console.error(err));
+                if (cdp) {
+                    clients.push(cdp);
+                    console.log(`setting up on-nav PG handler for ${targetUrl}`);
+                    cdp.on('Page.finalPageGraph', (params) => {
+                        // TODO: keep list of navigation-induced PG dumps for each target/frame over time
+                        console.log('Page.finalPageGraph', targetUrl, params.data);
+                    });
+                }
+            }
+        }));
         const page = yield browser.newPage();
         logger.debug(`Navigating to ${url}`);
         yield page.goto(url);
@@ -59,10 +74,11 @@ export const graphForUrl = (args, url) => __awaiter(void 0, void 0, void 0, func
         yield page.waitFor(waitTimeMs);
         try {
             logger.debug('Requesting PageGraph data');
-            const client = yield page.target().createCDPSession();
-            const pageGraphRs = yield client.send('Page.generatePageGraph');
-            pageGraphText = pageGraphRs.data;
-            logger.debug(`Received response of length: ${pageGraphText.length}`);
+            const pageGraphRs = yield Promise.all(clients.map((cdp) => __awaiter(void 0, void 0, void 0, function* () { return cdp.send('Page.generatePageGraph'); })));
+            //const client = await page.target().createCDPSession()
+            //const pageGraphRs = await client.send('Page.generatePageGraph')
+            pageGraphTexts = pageGraphRs.map(pg => pg.data);
+            //logger.debug(`Received response of length: ${pageGraphText.length}`)
         }
         catch (error) {
             if (isNotHTMLPageGraphError(error)) {
@@ -83,13 +99,13 @@ export const graphForUrl = (args, url) => __awaiter(void 0, void 0, void 0, func
             fsExtraLib.remove(pathForProfile);
         }
     }
-    return pageGraphText;
+    return pageGraphTexts;
 });
 export const writeGraphsForCrawl = (args) => __awaiter(void 0, void 0, void 0, function* () {
     const logger = getLogger(args);
     const url = args.urls[0];
-    const pageGraphText = yield graphForUrl(args, url);
+    const pageGraphTexts = yield graphsForUrl(args, url);
     logger.debug(`Writing result to ${args.outputPath}`);
-    yield fsExtraLib.writeFile(args.outputPath, pageGraphText);
+    yield fsExtraLib.writeFile(args.outputPath, JSON.stringify(pageGraphTexts)); // TODO: multiple-graphml-file-output
     return 1;
 });
