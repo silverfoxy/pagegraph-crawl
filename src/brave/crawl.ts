@@ -17,7 +17,10 @@ const setupEnv = (args: CrawlArgs): EnvHandle => {
 
   let closeFunc
 
-  if (xvfbPlatforms.has(platformName)) {
+  if (args.interactive) {
+    logger.debug('Interactive mode, skipping Xvfb')
+    closeFunc = () => { }
+  } else if (xvfbPlatforms.has(platformName)) {
     logger.debug(`Running on ${platformName}, starting Xvfb`)
     const xvfbHandle = new Xvbf()
     xvfbHandle.startSync()
@@ -27,7 +30,7 @@ const setupEnv = (args: CrawlArgs): EnvHandle => {
     }
   } else {
     logger.debug(`Running on ${platformName}, Xvfb not supported`)
-    closeFunc = () => {}
+    closeFunc = () => { }
   }
 
   return {

@@ -48,6 +48,11 @@ parser.addArgument(['--debug'], {
     choices: ['none', 'debug', 'verbose'],
     defaultValue: defaultDebugSetting
 });
+parser.addArgument(['-i', '--interactive'], {
+    help: 'Suppress use of Xvfb to allow interaction with spawned browser instance',
+    action: 'storeTrue',
+    defaultValue: false
+});
 const rawArgs = parser.parseArgs();
 const [isValid, errorOrArgs] = validate(rawArgs);
 if (!isValid) {

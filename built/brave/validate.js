@@ -54,6 +54,7 @@ export const validate = (rawArgs) => {
     }
     const urls = passedUrlArgs;
     const secs = rawArgs.secs;
+    const interactive = rawArgs.interactive;
     const validatedArgs = {
         executablePath,
         outputPath,
@@ -62,7 +63,8 @@ export const validate = (rawArgs) => {
         withShieldsUp: (rawArgs.shields === 'up'),
         debugLevel: rawArgs.debug,
         existingProfilePath: undefined,
-        persistProfilePath: undefined
+        persistProfilePath: undefined,
+        interactive
     };
     if (rawArgs.existing_profile && rawArgs.persist_profile) {
         return [false, 'Cannot specify both that you want to use an existing ' +

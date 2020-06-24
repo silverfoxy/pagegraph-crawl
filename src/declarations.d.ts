@@ -17,7 +17,8 @@ interface CrawlArgs {
   debugLevel: DebugLevel,
   seconds: number,
   existingProfilePath?: FilePath,
-  persistProfilePath?: FilePath
+  persistProfilePath?: FilePath,
+  interactive: boolean
 }
 
 type ValidationResult = [boolean, CrawlArgs | ErrorMsg]

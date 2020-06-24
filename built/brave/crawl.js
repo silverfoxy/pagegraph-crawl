@@ -19,7 +19,11 @@ const setupEnv = (args) => {
     const logger = getLogger(args);
     const platformName = osLib.platform();
     let closeFunc;
-    if (xvfbPlatforms.has(platformName)) {
+    if (args.interactive) {
+        logger.debug('Interactive mode, skipping Xvfb');
+        closeFunc = () => { };
+    }
+    else if (xvfbPlatforms.has(platformName)) {
         logger.debug(`Running on ${platformName}, starting Xvfb`);
         const xvfbHandle = new Xvbf();
         xvfbHandle.startSync();

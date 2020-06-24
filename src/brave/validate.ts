@@ -67,6 +67,7 @@ export const validate = (rawArgs: any): ValidationResult => {
   }
   const urls: Url[] = passedUrlArgs
   const secs: number = rawArgs.secs
+  const interactive: boolean = rawArgs.interactive;
 
   const validatedArgs = {
     executablePath,
@@ -76,7 +77,8 @@ export const validate = (rawArgs: any): ValidationResult => {
     withShieldsUp: (rawArgs.shields === 'up'),
     debugLevel: rawArgs.debug,
     existingProfilePath: undefined,
-    persistProfilePath: undefined
+    persistProfilePath: undefined,
+    interactive
   }
 
   if (rawArgs.existing_profile && rawArgs.persist_profile) {
