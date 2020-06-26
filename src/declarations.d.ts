@@ -43,3 +43,31 @@ interface EnvHandle {
 interface PageFinalPageGraph {
   data: string
 }
+
+type TabSnapEnd = 'active' | 'closed' | 'navigated';
+
+interface TabSnapshot {
+  url: string,
+  end: TabSnapEnd,
+  pageGraphML?: string
+}
+
+interface TabTreeNode {
+  parent?: TabTreeNode,
+  parentSnapshot?: TabSnapshot,
+  children?: TabTreeNode[],
+  snapshots: TabSnapshot[]
+}
+
+interface TabTreeCloseFunc {
+  (): Promise<void>
+}
+
+interface TabTreeDumpFunc {
+  (outputPath: string): Promise<string>
+}
+
+interface TabTreeTracker {
+  close: TabTreeCloseFunc,
+  dump: TabTreeDumpFunc
+}

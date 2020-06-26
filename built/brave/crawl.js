@@ -14,6 +14,7 @@ import puppeteerLib from 'puppeteer-core';
 import Xvbf from 'xvfb';
 import { getLogger } from './debug.js';
 import { puppeteerConfigForArgs } from './puppeteer.js';
+import { startTrackingBrowser as startTrackingBrowser } from './tabtree.js';
 const xvfbPlatforms = new Set(['linux', 'openbsd']);
 const setupEnv = (args) => {
     const logger = getLogger(args);
@@ -40,32 +41,16 @@ const setupEnv = (args) => {
         close: closeFunc
     };
 };
-const isNotHTMLPageGraphError = (error) => {
-    return error.message.indexOf('No Page Graph for this Document') >= 0;
-};
 export const graphsForUrl = (args, url) => __awaiter(void 0, void 0, void 0, function* () {
     const logger = getLogger(args);
     const { puppeteerArgs, pathForProfile, shouldClean } = puppeteerConfigForArgs(args);
     const envHandle = setupEnv(args);
-    let pageGraphTexts;
+    let rawOutput;
     const clients = [];
     try {
         logger.debug('Launching puppeteer with args: ', puppeteerArgs);
         const browser = yield puppeteerLib.launch(puppeteerArgs);
-        browser.on('targetcreated', (target /*TODO: type info for puppeteer?*/) => __awaiter(void 0, void 0, void 0, function* () {
-            if (target.type() === "page") {
-                const targetUrl = target.url();
-                const cdp = yield target.createCDPSession().catch((err) => console.error(err));
-                if (cdp) {
-                    clients.push(cdp);
-                    console.log(`setting up on-nav PG handler for ${targetUrl}`);
-                    cdp.on('Page.finalPageGraph', (params) => {
-                        // TODO: keep list of navigation-induced PG dumps for each target/frame over time
-                        console.log('Page.finalPageGraph', targetUrl, params.data);
-                    });
-                }
-            }
-        }));
+        const tracker = yield startTrackingBrowser(browser, logger);
         const page = yield browser.newPage();
         logger.debug(`Navigating to ${url}`);
         yield page.goto(url);
@@ -73,20 +58,8 @@ export const graphsForUrl = (args, url) => __awaiter(void 0, void 0, void 0, fun
         logger.debug(`Waiting for ${waitTimeMs}ms`);
         yield page.waitFor(waitTimeMs);
         try {
-            logger.debug('Requesting PageGraph data');
-            const pageGraphRs = yield Promise.all(clients.map((cdp) => __awaiter(void 0, void 0, void 0, function* () { return cdp.send('Page.generatePageGraph'); })));
-            //const client = await page.target().createCDPSession()
-            //const pageGraphRs = await client.send('Page.generatePageGraph')
-            pageGraphTexts = pageGraphRs.map(pg => pg.data);
-            //logger.debug(`Received response of length: ${pageGraphText.length}`)
-        }
-        catch (error) {
-            if (isNotHTMLPageGraphError(error)) {
-                const currentUrl = page.url();
-                logger.debug(`Was not able to fetch PageGraph data for ${currentUrl}`);
-                throw new Error(`Wrong protocol for ${url}`);
-            }
-            throw error;
+            yield tracker.close();
+            rawOutput = yield tracker.dump(args.outputPath);
         }
         finally {
             logger.debug('Closing the browser');
@@ -99,13 +72,13 @@ export const graphsForUrl = (args, url) => __awaiter(void 0, void 0, void 0, fun
             fsExtraLib.remove(pathForProfile);
         }
     }
-    return pageGraphTexts;
+    return rawOutput;
 });
 export const writeGraphsForCrawl = (args) => __awaiter(void 0, void 0, void 0, function* () {
     const logger = getLogger(args);
     const url = args.urls[0];
-    const pageGraphTexts = yield graphsForUrl(args, url);
+    const rawOutput = yield graphsForUrl(args, url);
     logger.debug(`Writing result to ${args.outputPath}`);
-    yield fsExtraLib.writeFile(args.outputPath, JSON.stringify(pageGraphTexts)); // TODO: multiple-graphml-file-output
+    yield fsExtraLib.writeFile(args.outputPath, rawOutput); // TODO: multiple-graphml-file-output
     return 1;
 });
