@@ -68,6 +68,7 @@ export const validate = (rawArgs: any): ValidationResult => {
   const urls: Url[] = passedUrlArgs
   const secs: number = rawArgs.secs
   const interactive: boolean = rawArgs.interactive;
+  const userAgent: string | undefined = rawArgs.user_agent;
 
   const validatedArgs = {
     executablePath,
@@ -78,7 +79,8 @@ export const validate = (rawArgs: any): ValidationResult => {
     debugLevel: rawArgs.debug,
     existingProfilePath: undefined,
     persistProfilePath: undefined,
-    interactive
+    interactive,
+    userAgent
   }
 
   if (rawArgs.existing_profile && rawArgs.persist_profile) {

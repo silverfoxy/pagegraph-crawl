@@ -57,6 +57,10 @@ parser.addArgument(['-i', '--interactive'], {
   action: 'storeTrue',
   defaultValue: false
 })
+parser.addArgument(['-a', '--user-agent'], {
+  help: 'Override the browser\'s UserAgent string to USER_AGENT',
+  metavar: 'USER_AGENT'
+})
 
 const rawArgs = parser.parseArgs()
 const [isValid, errorOrArgs] = validate(rawArgs)

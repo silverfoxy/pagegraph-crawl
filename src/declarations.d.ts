@@ -18,7 +18,8 @@ interface CrawlArgs {
   seconds: number,
   existingProfilePath?: FilePath,
   persistProfilePath?: FilePath,
-  interactive: boolean
+  interactive: boolean,
+  userAgent?: string
 }
 
 type ValidationResult = [boolean, CrawlArgs | ErrorMsg]

@@ -53,6 +53,10 @@ export const graphsForUrl = async (args: CrawlArgs, url: Url): Promise<string> =
     const tracker = await startTrackingBrowser(browser, logger)
     const page = await browser.newPage()
 
+    if (args.userAgent) {
+      await page.setUserAgent(args.userAgent)
+    }
+
     logger.debug(`Navigating to ${url}`)
     await page.goto(url)
 

@@ -52,6 +52,9 @@ export const graphsForUrl = (args, url) => __awaiter(void 0, void 0, void 0, fun
         const browser = yield puppeteerLib.launch(puppeteerArgs);
         const tracker = yield startTrackingBrowser(browser, logger);
         const page = yield browser.newPage();
+        if (args.userAgent) {
+            yield page.setUserAgent(args.userAgent);
+        }
         logger.debug(`Navigating to ${url}`);
         yield page.goto(url);
         const waitTimeMs = args.seconds * 1000;

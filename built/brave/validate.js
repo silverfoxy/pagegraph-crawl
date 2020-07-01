@@ -55,6 +55,7 @@ export const validate = (rawArgs) => {
     const urls = passedUrlArgs;
     const secs = rawArgs.secs;
     const interactive = rawArgs.interactive;
+    const userAgent = rawArgs.user_agent;
     const validatedArgs = {
         executablePath,
         outputPath,
@@ -64,7 +65,8 @@ export const validate = (rawArgs) => {
         debugLevel: rawArgs.debug,
         existingProfilePath: undefined,
         persistProfilePath: undefined,
-        interactive
+        interactive,
+        userAgent
     };
     if (rawArgs.existing_profile && rawArgs.persist_profile) {
         return [false, 'Cannot specify both that you want to use an existing ' +
