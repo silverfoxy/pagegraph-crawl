@@ -2,6 +2,7 @@ import * as fsLib from 'fs';
 import * as pathLib from 'path';
 import * as urlLib from 'url';
 import { getLoggerForLevel } from './debug.js';
+import { getTrackerFactoryForStrategy } from './trackers.js';
 const isUrl = (possibleUrl) => {
     try {
         (new urlLib.URL(possibleUrl)); // eslint-disable-line
@@ -66,7 +67,8 @@ export const validate = (rawArgs) => {
         existingProfilePath: undefined,
         persistProfilePath: undefined,
         interactive,
-        userAgent
+        userAgent,
+        trackerFactory: getTrackerFactoryForStrategy(rawArgs.track)
     };
     if (rawArgs.existing_profile && rawArgs.persist_profile) {
         return [false, 'Cannot specify both that you want to use an existing ' +

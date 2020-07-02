@@ -5,6 +5,7 @@ import { validate } from './brave/validate.js';
 const defaultCrawlSecs = 30;
 const defaultShieldsSetting = 'down';
 const defaultDebugSetting = 'none';
+const defaultTrackStrategy = 'single';
 const parser = new argparseLib.ArgumentParser({
     version: 0.1,
     addHelp: true,
@@ -56,6 +57,11 @@ parser.addArgument(['-i', '--interactive'], {
 parser.addArgument(['-a', '--user-agent'], {
     help: 'Override the browser\'s UserAgent string to USER_AGENT',
     metavar: 'USER_AGENT'
+});
+parser.addArgument(['--track'], {
+    help: 'Select a tab/target-tracking strategy for PageGraph generation',
+    choices: ['single', 'multi'],
+    defaultValue: defaultTrackStrategy
 });
 const rawArgs = parser.parseArgs();
 const [isValid, errorOrArgs] = validate(rawArgs);

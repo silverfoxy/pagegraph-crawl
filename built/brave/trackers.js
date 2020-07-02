@@ -127,6 +127,7 @@ export const trackAllTargets = (page /* puppeteer Page */, logger) => __awaiter(
                                 // EAT IT and carry on
                             }
                             else {
+                                logger.debug("ERROR getting PageGraph data", error);
                                 throw error;
                             }
                         }
@@ -193,6 +194,7 @@ export const trackSingleTarget = (page /* puppeteer Page */, logger) => __awaite
                     // EAT IT and carry on
                 }
                 else {
+                    logger.debug("ERROR getting PageGraph data", error);
                     throw error;
                 }
             }

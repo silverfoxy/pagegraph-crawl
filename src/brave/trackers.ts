@@ -42,7 +42,9 @@ const isSessionClosedError = (error: Error): boolean => {
     return error.message.indexOf('Session closed. Most likely the page has been closed.') >= 0
 }
 
-export const startTrackingBrowser = async (browser: any /* puppeteer Browser */, logger: Logger): Promise<TabTreeTracker> => {
+export const trackAllTargets = async (page: any /* puppeteer Page */, logger: Logger): Promise<TargetTracker> => {
+    const browser: any /* puppeteer Browser */ = page.browser();
+
     const tabTreeRoots: TabTreeNode[] = [];
     const targetLookupMap = new Map<any /* puppeteer Target */, TabTreeNode>()
     const lookupTarget = (target: any /* puppeteer Target */, mode: string): TabTreeNode | undefined => {
@@ -127,6 +129,7 @@ export const startTrackingBrowser = async (browser: any /* puppeteer Browser */,
                                 logger.debug(`Was not able to fetch PageGraph data from target for ${currentUrl}`)
                                 // EAT IT and carry on
                             } else {
+                                logger.debug("ERROR getting PageGraph data", error)
                                 throw error
                             }
                         }
@@ -164,10 +167,47 @@ export const startTrackingBrowser = async (browser: any /* puppeteer Browser */,
                 })
             }
             tabTreeRoots.forEach((root, i) => {
-
                 dumpFiles(root, `t${i}`)
             })
-            return 'foo'
+            return 'TODO: standardize a JSON structure of the tab tree for later reference'
         }
     })
+}
+
+export const trackSingleTarget = async (page: any /* puppeteer Page */, logger: Logger): Promise<TargetTracker> => {
+    const target = page.target()
+    const client = await target.createCDPSession()
+    let finalPageGraph: string | undefined
+
+    return Object.freeze({
+        close: async (): Promise<void> => {
+            try {
+                const params: PageFinalPageGraph = await client.send('Page.generatePageGraph')
+                finalPageGraph = params.data
+            } catch (error) {
+                const currentUrl = target.url()
+                if (isSessionClosedError(error)) {
+                    logger.debug(`session to target for ${currentUrl} dropped`)
+                    // EAT IT and carry on
+                } else if (isNotHTMLPageGraphError(error)) {
+                    logger.debug(`Was not able to fetch PageGraph data from target for ${currentUrl}`)
+                    // EAT IT and carry on
+                } else {
+                    logger.debug("ERROR getting PageGraph data", error)
+                    throw error
+                }
+            }
+        },
+        dump: async (_: string): Promise<string> => {
+            if (finalPageGraph) {
+                return finalPageGraph
+            } else {
+                throw Error("no PageGraph data available for sole tracked target")
+            }
+        }
+    })
+}
+
+export const getTrackerFactoryForStrategy = (strategy: TrackerStrategy): TargetTrackerFactory => {
+    return (strategy === 'multi') ? trackAllTargets : trackSingleTarget;
 }

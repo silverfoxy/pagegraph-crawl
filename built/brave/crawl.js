@@ -14,7 +14,6 @@ import puppeteerLib from 'puppeteer-core';
 import Xvbf from 'xvfb';
 import { getLogger } from './debug.js';
 import { puppeteerConfigForArgs } from './puppeteer.js';
-import { startTrackingBrowser as startTrackingBrowser } from './tabtree.js';
 const xvfbPlatforms = new Set(['linux', 'openbsd']);
 const setupEnv = (args) => {
     const logger = getLogger(args);
@@ -50,8 +49,8 @@ export const graphsForUrl = (args, url) => __awaiter(void 0, void 0, void 0, fun
     try {
         logger.debug('Launching puppeteer with args: ', puppeteerArgs);
         const browser = yield puppeteerLib.launch(puppeteerArgs);
-        const tracker = yield startTrackingBrowser(browser, logger);
         const page = yield browser.newPage();
+        const tracker = yield args.trackerFactory(page, logger);
         if (args.userAgent) {
             yield page.setUserAgent(args.userAgent);
         }

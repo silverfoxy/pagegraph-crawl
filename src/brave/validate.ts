@@ -3,6 +3,7 @@ import * as pathLib from 'path'
 import * as urlLib from 'url'
 
 import { getLoggerForLevel } from './debug.js'
+import { getTrackerFactoryForStrategy } from './trackers.js'
 
 const isUrl = (possibleUrl: string): boolean => {
   try {
@@ -80,18 +81,19 @@ export const validate = (rawArgs: any): ValidationResult => {
     existingProfilePath: undefined,
     persistProfilePath: undefined,
     interactive,
-    userAgent
+    userAgent,
+    trackerFactory: getTrackerFactoryForStrategy(rawArgs.track)
   }
 
   if (rawArgs.existing_profile && rawArgs.persist_profile) {
     return [false, 'Cannot specify both that you want to use an existing ' +
-                   'profile, and that you want to persist a new profile.']
+      'profile, and that you want to persist a new profile.']
   }
 
   if (rawArgs.existing_profile) {
     if (!isDir(rawArgs.existing_profile)) {
       return [false, 'Provided existing profile path is not a directory: ' +
-                     `${rawArgs.existing_profile}.`]
+        `${rawArgs.existing_profile}.`]
     }
     validatedArgs.existingProfilePath = rawArgs.existing_profile
   }
@@ -99,7 +101,7 @@ export const validate = (rawArgs: any): ValidationResult => {
   if (rawArgs.persist_profile) {
     if (isDir(rawArgs.persist_profile) || isFile(rawArgs.persist_profile)) {
       return [false, 'File already exists at path for persisting a ' +
-                     `profile: ${rawArgs.persist_profile}.`]
+        `profile: ${rawArgs.persist_profile}.`]
     }
     validatedArgs.persistProfilePath = rawArgs.persist_profile
   }

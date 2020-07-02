@@ -8,6 +8,7 @@ type Url = string
 type FilePath = string
 type ErrorMsg = string
 type DebugLevel = 'none' | 'debug' | 'verbose'
+type TrackerStrategy = 'single' | 'multi'
 
 interface CrawlArgs {
   executablePath: FilePath,
@@ -19,7 +20,8 @@ interface CrawlArgs {
   existingProfilePath?: FilePath,
   persistProfilePath?: FilePath,
   interactive: boolean,
-  userAgent?: string
+  userAgent?: string,
+  trackerFactory: TargetTrackerFactory
 }
 
 type ValidationResult = [boolean, CrawlArgs | ErrorMsg]
@@ -60,15 +62,19 @@ interface TabTreeNode {
   snapshots: TabSnapshot[]
 }
 
-interface TabTreeCloseFunc {
+interface TargetTrackerCloseFunc {
   (): Promise<void>
 }
 
-interface TabTreeDumpFunc {
+interface TargetTrackerDumpFunc {
   (outputPath: string): Promise<string>
 }
 
-interface TabTreeTracker {
-  close: TabTreeCloseFunc,
-  dump: TabTreeDumpFunc
+interface TargetTracker {
+  close: TargetTrackerCloseFunc,
+  dump: TargetTrackerDumpFunc
+}
+
+interface TargetTrackerFactory {
+  (page: any /* puppeteer Page */, logger: Logger): Promise<TargetTracker>
 }
