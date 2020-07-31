@@ -25,21 +25,21 @@ parser.addArgument(['-o', '--output'], {
 })
 parser.addArgument(['-u', '--url'], {
   help: 'The URLs(s) to record, in desired order (currently only crawls the ' +
-        'first URL)',
+    'first URL)',
   required: true,
   nargs: '+'
 })
 parser.addArgument(['-e', '--existing-profile'], {
   help: 'The chromium profile to use when crawling. Cannot ' +
-        'be used with "--persist-profile"'
+    'be used with "--persist-profile"'
 })
 parser.addArgument(['-p', '--persist-profile'], {
   help: 'If provided, the user profile will be saved at this path. Cannot ' +
-        'be used with "--existing-profile"'
+    'be used with "--existing-profile"'
 })
 parser.addArgument(['-s', '--shields'], {
   help: 'Whether to measure with shields up or down. Ignored when using ' +
-        `"--existing-profile".  Default: ${defaultShieldsSetting}`,
+    `"--existing-profile".  Default: ${defaultShieldsSetting}`,
   choices: ['up', 'down'],
   defaultValue: defaultShieldsSetting
 })
@@ -66,6 +66,10 @@ parser.addArgument(['--track'], {
   help: 'Select a tab/target-tracking strategy for PageGraph generation',
   choices: ['single', 'multi'],
   defaultValue: defaultTrackStrategy
+})
+parser.addArgument(['--proxy-server'], {
+  help: 'Use an HTTP/SOCKS proxy at URL for all navigations',
+  metavar: 'URL'
 })
 
 const rawArgs = parser.parseArgs()

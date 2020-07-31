@@ -68,10 +68,10 @@ export const validate = (rawArgs: any): ValidationResult => {
   }
   const urls: Url[] = passedUrlArgs
   const secs: number = rawArgs.secs
-  const interactive: boolean = rawArgs.interactive;
-  const userAgent: string | undefined = rawArgs.user_agent;
+  const interactive: boolean = rawArgs.interactive
+  const userAgent: string | undefined = rawArgs.user_agent
 
-  const validatedArgs = {
+  const validatedArgs: CrawlArgs = {
     executablePath,
     outputPath,
     urls,
@@ -82,7 +82,16 @@ export const validate = (rawArgs: any): ValidationResult => {
     persistProfilePath: undefined,
     interactive,
     userAgent,
-    trackerFactory: getTrackerFactoryForStrategy(rawArgs.track)
+    trackerFactory: getTrackerFactoryForStrategy(rawArgs.track),
+    proxyServer: undefined
+  }
+
+  if (rawArgs.proxy_server) {
+    try {
+      validatedArgs.proxyServer = new URL(rawArgs.proxy_server)
+    } catch (err) {
+      return [false, `invalid proxy-server: ${err.toString()}`]
+    }
   }
 
   if (rawArgs.existing_profile && rawArgs.persist_profile) {

@@ -45,7 +45,6 @@ export const graphsForUrl = async (args: CrawlArgs, url: Url): Promise<string> =
   const envHandle = setupEnv(args)
   let rawOutput: string
 
-  const clients: any[] /*TODO: type info for puppeteer?*/ = [];
   try {
     logger.debug('Launching puppeteer with args: ', puppeteerArgs)
     const browser = await puppeteerLib.launch(puppeteerArgs)

@@ -21,7 +21,8 @@ interface CrawlArgs {
   persistProfilePath?: FilePath,
   interactive: boolean,
   userAgent?: string,
-  trackerFactory: TargetTrackerFactory
+  trackerFactory: TargetTrackerFactory,
+  proxyServer?: URL,
 }
 
 type ValidationResult = [boolean, CrawlArgs | ErrorMsg]
@@ -44,15 +45,27 @@ interface EnvHandle {
 }
 
 interface PageFinalPageGraph {
+  frameId: string,
   data: string
+}
+
+interface PageFrameAttached {
+  frameId: string,
+  parentFrameId?: string
 }
 
 type TabSnapEnd = 'active' | 'closed' | 'navigated';
 
+interface FrameNode {
+  id: string,
+  parent?: FrameNode,
+  pageGraph?: string
+}
+
 interface TabSnapshot {
   url: string,
   end: TabSnapEnd,
-  pageGraphML?: string
+  frames: Map<string, FrameNode>
 }
 
 interface TabTreeNode {
