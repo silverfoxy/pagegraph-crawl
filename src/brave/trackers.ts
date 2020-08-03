@@ -20,13 +20,28 @@ const newTreeNode = (openerNode: TabTreeNode | undefined): TabTreeNode => {
   return node
 }
 
-const pushNewSnapshot = (node: TabTreeNode, target: any /* puppeteer Target */): TabSnapshot => {
+const pushNewSnapshot = (node: TabTreeNode, page: any /* puppeteer Page */): TabSnapshot => {
   const snap: TabSnapshot = {
-    url: target.url(),
+    url: page.url(),
     end: 'active',
     frames: new Map<string, FrameNode>()
   }
   node.snapshots.push(snap)
+
+  for (const initialFrame of page.frames()) {
+    snap.frames.set(initialFrame._id, { id: initialFrame._id })
+  }
+
+  for (const fixupFrame of page.frames()) {
+    const thisFrame = snap.frames.get(fixupFrame._id)
+    if (fixupFrame._parentFrame) {
+      const parentFrame = snap.frames.get(fixupFrame._parentFrame._id)
+      if (thisFrame) {
+        thisFrame.parent = parentFrame
+      }
+    }
+  }
+
   return snap
 }
 
@@ -42,9 +57,60 @@ const isSessionClosedError = (error: Error): boolean => {
   return error.message.indexOf('Session closed. Most likely the page has been closed.') >= 0
 }
 
-export const trackAllTargets = async (page: any /* puppeteer Page */, logger: Logger): Promise<TargetTracker> => {
-  const browser: any /* puppeteer Browser */ = page.browser()
+export const trackAllTargetsNew = async (browser: any /* puppeteer Browser */, logger: Logger): Promise<TargetTracker> => {
+  const sessionSet = new WeakSet()
+  const pageSet = new Set()
+  const instrumentSession = async (cdp: any /* puppeteer CDPSession */) => {
+    const sessionId = cdp._sessionId
+    const targetType = cdp._targetType
+    if (sessionSet.has(cdp)) {
+      console.log('old session', sessionId, targetType)
+      return
+    }
+    console.log('new session', sessionId, targetType)
+    if (targetType === "page") {
+      pageSet.add(cdp)
+    }
 
+    if (['page', 'iframe'].includes(targetType)) {
+      cdp.on('Page.finalPageGraph', async (params: PageFinalPageGraph) => {
+        logger.debug(`Page.finalPageGraph { frameId: ${params.frameId}, data: ${params.data.length} chars of graphML }`)
+      })
+      cdp.on('Page.frameAttached', async (params: any) => {
+        logger.debug('FRAME ATTACHED:', params)
+      })
+      await cdp.send('Page.enable')
+    }
+    cdp.on('Target.attachedToTarget', async (params: any) => {
+      const { sessionId, targetInfo } = params
+      console.log('COLLECTOR-DEBUG: Target.attachedToTarget:', sessionId, targetInfo.type, targetInfo.targetId)
+      const cdp = browser._connection._sessions.get(sessionId)
+      await instrumentSession(cdp)
+    })
+    await cdp.send('Target.setAutoAttach', {
+      autoAttach: true,
+      waitForDebuggerOnStart: false,
+      flatten: true
+    })
+    console.log(`DONE INSTRUMENTING SESSION ${sessionId}`)
+  }
+
+  const rootSession = await browser.target().createCDPSession()
+  await instrumentSession(rootSession)
+
+  return Object.freeze({
+    close: async () => {
+      await Promise.all(Array.from(pageSet.values()).map(async (pageCdp: any /* puppeteer CDPSession */) => {
+        await pageCdp.send('Page.navigate', { url: "about:blank" })
+      }))
+    },
+    dump: async () => {
+      return ''
+    }
+  })
+}
+
+export const trackAllTargets = async (browser: any /* puppeteer Browser */, logger: Logger): Promise<TargetTracker> => {
   const tabTreeRoots: TabTreeNode[] = []
   const targetLookupMap = new Map<any /* puppeteer Target */, TabTreeNode>()
   const lookupTarget = (target: any /* puppeteer Target */, mode: string): TabTreeNode | undefined => {
@@ -69,7 +135,8 @@ export const trackAllTargets = async (page: any /* puppeteer Page */, logger: Lo
       if (!node.parent) {
         tabTreeRoots.push(node)
       }
-      pushNewSnapshot(node, target)
+      const page = await target.page()
+      pushNewSnapshot(node, page)
 
       const client = await target.createCDPSession()
       targetClientMap.set(target, client)
@@ -86,24 +153,26 @@ export const trackAllTargets = async (page: any /* puppeteer Page */, logger: Lo
       client.on('Page.frameAttached', async (params: PageFrameAttached) => {
         const snap = activeSnapshot(node)
         const frame: FrameNode = { id: params.frameId }
-        
+
         if (params.parentFrameId) {
           frame.parent = snap.frames.get(params.parentFrameId)
         }
 
         snap.frames.set(frame.id, frame)
+        logger.debug('FRAME:', frame)
       })
       await client.send('Page.enable')
     }
   }
   browser.on('targetcreated', wrapNewTarget)
-  browser.on('targetchanged', (target: any /* puppeteer Target */) => {
+  browser.on('targetchanged', async (target: any /* puppeteer Target */) => {
     if (target.type() === 'page') {
       logger.debug('changed target', target.url())
       const node = lookupTarget(target, 'changed')
       if (node) {
         activeSnapshot(node).end = 'navigated'
-        pushNewSnapshot(node, target)
+        const page = await target.page()
+        pushNewSnapshot(node, page)
       }
     }
   })
@@ -129,9 +198,9 @@ export const trackAllTargets = async (page: any /* puppeteer Page */, logger: Lo
           const client = targetClientMap.get(target)
           if (client) {
             try {
-              const params: PageFinalPageGraph = await client.send('Page.generatePageGraph')
+              // navigate each page to "about:blank" to force destruction/notification for all PGs in that tab
+              await client.send('Page.navigate', { url: 'about:blank' })
               const snap = activeSnapshot(node)
-              snap.pageGraphML = params.data
               snap.end = 'closed'
             } catch (error) {
               const currentUrl = target.url()
@@ -163,11 +232,14 @@ export const trackAllTargets = async (page: any /* puppeteer Page */, logger: Lo
       const outputDir = pathLib.dirname(outputPath)
       const dumpFiles = (node: TabTreeNode, prefix: string): void => {
         node.snapshots.forEach((snap, i) => {
-          const filename = pathLib.join(outputDir, `${prefix}.${i}.graphml`)
-          logger.debug(`ready to write '${filename}' (${snap.pageGraphML ? snap.pageGraphML.length : 'n/a'} chars)`)
-          if (snap.pageGraphML) {
-            fsLib.writeFileSync(filename, snap.pageGraphML)
-          }
+          snap.frames.forEach((frame) => {
+            const frameId = frame.id // frame.parent ? frame.id : "root"
+            const filename = pathLib.join(outputDir, `${prefix}.${i}.${frameId}.graphml`)
+            logger.debug(`ready to write '${filename}' (${frame.pageGraph ? frame.pageGraph.length : 'n/a'} chars)`)
+            if (frame.pageGraph) {
+              fsLib.writeFileSync(filename, frame.pageGraph)
+            }
+          })
         })
         node.children && node.children.forEach((kid, i) => {
           let nextPrefix = prefix
@@ -181,7 +253,7 @@ export const trackAllTargets = async (page: any /* puppeteer Page */, logger: Lo
       tabTreeRoots.forEach((root, i) => {
         dumpFiles(root, `t${i}`)
       })
-      return 'TODO: standardize a JSON structure of the tab tree for later reference'
+      return JSON.stringify(Array.from(tabTreeRoots.entries()))
     }
   })
 }

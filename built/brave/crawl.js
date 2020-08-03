@@ -45,12 +45,11 @@ export const graphsForUrl = (args, url) => __awaiter(void 0, void 0, void 0, fun
     const { puppeteerArgs, pathForProfile, shouldClean } = puppeteerConfigForArgs(args);
     const envHandle = setupEnv(args);
     let rawOutput;
-    const clients = [];
     try {
         logger.debug('Launching puppeteer with args: ', puppeteerArgs);
         const browser = yield puppeteerLib.launch(puppeteerArgs);
+        const tracker = yield args.trackerFactory(browser, logger);
         const page = yield browser.newPage();
-        const tracker = yield args.trackerFactory(page, logger);
         if (args.userAgent) {
             yield page.setUserAgent(args.userAgent);
         }

@@ -26,12 +26,25 @@ const newTreeNode = (openerNode) => {
     }
     return node;
 };
-const pushNewSnapshot = (node, target /* puppeteer Target */) => {
+const pushNewSnapshot = (node, page /* puppeteer Page */) => {
     const snap = {
-        url: target.url(),
-        end: 'active'
+        url: page.url(),
+        end: 'active',
+        frames: new Map()
     };
     node.snapshots.push(snap);
+    for (const initialFrame of page.frames()) {
+        snap.frames.set(initialFrame._id, { id: initialFrame._id });
+    }
+    for (const fixupFrame of page.frames()) {
+        const thisFrame = snap.frames.get(fixupFrame._id);
+        if (fixupFrame._parentFrame) {
+            const parentFrame = snap.frames.get(fixupFrame._parentFrame._id);
+            if (thisFrame) {
+                thisFrame.parent = parentFrame;
+            }
+        }
+    }
     return snap;
 };
 const activeSnapshot = (node) => {
@@ -43,8 +56,56 @@ const isNotHTMLPageGraphError = (error) => {
 const isSessionClosedError = (error) => {
     return error.message.indexOf('Session closed. Most likely the page has been closed.') >= 0;
 };
-export const trackAllTargets = (page /* puppeteer Page */, logger) => __awaiter(void 0, void 0, void 0, function* () {
-    const browser = page.browser();
+export const trackAllTargetsNew = (browser /* puppeteer Browser */, logger) => __awaiter(void 0, void 0, void 0, function* () {
+    const sessionSet = new WeakSet();
+    const pageSet = new Set();
+    const instrumentSession = (cdp /* puppeteer CDPSession */) => __awaiter(void 0, void 0, void 0, function* () {
+        const sessionId = cdp._sessionId;
+        const targetType = cdp._targetType;
+        if (sessionSet.has(cdp)) {
+            console.log('old session', sessionId, targetType);
+            return;
+        }
+        console.log('new session', sessionId, targetType);
+        if (targetType === "page") {
+            pageSet.add(cdp);
+        }
+        if (['page', 'iframe'].includes(targetType)) {
+            cdp.on('Page.finalPageGraph', (params) => __awaiter(void 0, void 0, void 0, function* () {
+                logger.debug(`Page.finalPageGraph { frameId: ${params.frameId}, data: ${params.data.length} chars of graphML }`);
+            }));
+            cdp.on('Page.frameAttached', (params) => __awaiter(void 0, void 0, void 0, function* () {
+                logger.debug('FRAME ATTACHED:', params);
+            }));
+            yield cdp.send('Page.enable');
+        }
+        cdp.on('Target.attachedToTarget', (params) => __awaiter(void 0, void 0, void 0, function* () {
+            const { sessionId, targetInfo } = params;
+            console.log('COLLECTOR-DEBUG: Target.attachedToTarget:', sessionId, targetInfo.type, targetInfo.targetId);
+            const cdp = browser._connection._sessions.get(sessionId);
+            yield instrumentSession(cdp);
+        }));
+        yield cdp.send('Target.setAutoAttach', {
+            autoAttach: true,
+            waitForDebuggerOnStart: false,
+            flatten: true
+        });
+        console.log(`DONE INSTRUMENTING SESSION ${sessionId}`);
+    });
+    const rootSession = yield browser.target().createCDPSession();
+    yield instrumentSession(rootSession);
+    return Object.freeze({
+        close: () => __awaiter(void 0, void 0, void 0, function* () {
+            yield Promise.all(Array.from(pageSet.values()).map((pageCdp /* puppeteer CDPSession */) => __awaiter(void 0, void 0, void 0, function* () {
+                yield pageCdp.send('Page.navigate', { url: "about:blank" });
+            })));
+        }),
+        dump: () => __awaiter(void 0, void 0, void 0, function* () {
+            return '';
+        })
+    });
+});
+export const trackAllTargets = (browser /* puppeteer Browser */, logger) => __awaiter(void 0, void 0, void 0, function* () {
     const tabTreeRoots = [];
     const targetLookupMap = new Map();
     const lookupTarget = (target /* puppeteer Target */, mode) => {
@@ -67,30 +128,45 @@ export const trackAllTargets = (page /* puppeteer Page */, logger) => __awaiter(
             if (!node.parent) {
                 tabTreeRoots.push(node);
             }
-            pushNewSnapshot(node, target);
+            const page = yield target.page();
+            pushNewSnapshot(node, page);
             const client = yield target.createCDPSession();
             targetClientMap.set(target, client);
             client.on('Page.finalPageGraph', (params) => {
                 logger.debug(`got Page.finalPageGraph signal for ${target.url()} target (${params.data.length} chars)`);
                 const snap = activeSnapshot(node);
-                snap.end = 'navigated';
-                // TODO: perhaps add in more context on what kind of navigation it was?
-                snap.pageGraphML = params.data;
+                const frame = snap.frames.get(params.frameId);
+                if (frame) {
+                    frame.pageGraph = params.data; // TODO: what about frame navigations? multiple PGs?
+                }
+                else {
+                    logger.debug(`ERROR: got finalPageGraph for unknown frame ${params.frameId}! ignoring...`);
+                }
             });
+            client.on('Page.frameAttached', (params) => __awaiter(void 0, void 0, void 0, function* () {
+                const snap = activeSnapshot(node);
+                const frame = { id: params.frameId };
+                if (params.parentFrameId) {
+                    frame.parent = snap.frames.get(params.parentFrameId);
+                }
+                snap.frames.set(frame.id, frame);
+                logger.debug('FRAME:', frame);
+            }));
             yield client.send('Page.enable');
         }
     });
     browser.on('targetcreated', wrapNewTarget);
-    browser.on('targetchanged', (target /* puppeteer Target */) => {
+    browser.on('targetchanged', (target /* puppeteer Target */) => __awaiter(void 0, void 0, void 0, function* () {
         if (target.type() === 'page') {
             logger.debug('changed target', target.url());
             const node = lookupTarget(target, 'changed');
             if (node) {
                 activeSnapshot(node).end = 'navigated';
-                pushNewSnapshot(node, target);
+                const page = yield target.page();
+                pushNewSnapshot(node, page);
             }
         }
-    });
+    }));
     browser.on('targetdestroyed', (target /* puppeteer Target */) => {
         if (target.type() === 'page') {
             logger.debug('destroyed target', target.url());
@@ -111,9 +187,9 @@ export const trackAllTargets = (page /* puppeteer Page */, logger) => __awaiter(
                     const client = targetClientMap.get(target);
                     if (client) {
                         try {
-                            const params = yield client.send('Page.generatePageGraph');
+                            // navigate each page to "about:blank" to force destruction/notification for all PGs in that tab
+                            yield client.send('Page.navigate', { url: 'about:blank' });
                             const snap = activeSnapshot(node);
-                            snap.pageGraphML = params.data;
                             snap.end = 'closed';
                         }
                         catch (error) {
@@ -127,7 +203,7 @@ export const trackAllTargets = (page /* puppeteer Page */, logger) => __awaiter(
                                 // EAT IT and carry on
                             }
                             else {
-                                logger.debug("ERROR getting PageGraph data", error);
+                                logger.debug('ERROR getting PageGraph data', error);
                                 throw error;
                             }
                         }
@@ -148,14 +224,16 @@ export const trackAllTargets = (page /* puppeteer Page */, logger) => __awaiter(
         }),
         dump: (outputPath) => __awaiter(void 0, void 0, void 0, function* () {
             const outputDir = pathLib.dirname(outputPath);
-            const snapMap = new Map();
             const dumpFiles = (node, prefix) => {
                 node.snapshots.forEach((snap, i) => {
-                    const filename = pathLib.join(outputDir, `${prefix}.${i}.graphml`);
-                    logger.debug(`ready to write '${filename}' (${snap.pageGraphML ? snap.pageGraphML.length : "n/a"} chars)`);
-                    if (snap.pageGraphML) {
-                        fsLib.writeFileSync(filename, snap.pageGraphML);
-                    }
+                    snap.frames.forEach((frame) => {
+                        const frameId = frame.id; // frame.parent ? frame.id : "root"
+                        const filename = pathLib.join(outputDir, `${prefix}.${i}.${frameId}.graphml`);
+                        logger.debug(`ready to write '${filename}' (${frame.pageGraph ? frame.pageGraph.length : 'n/a'} chars)`);
+                        if (frame.pageGraph) {
+                            fsLib.writeFileSync(filename, frame.pageGraph);
+                        }
+                    });
                 });
                 node.children && node.children.forEach((kid, i) => {
                     let nextPrefix = prefix;
@@ -169,7 +247,7 @@ export const trackAllTargets = (page /* puppeteer Page */, logger) => __awaiter(
             tabTreeRoots.forEach((root, i) => {
                 dumpFiles(root, `t${i}`);
             });
-            return 'TODO: standardize a JSON structure of the tab tree for later reference';
+            return JSON.stringify(Array.from(tabTreeRoots.entries()));
         })
     });
 });
@@ -194,17 +272,17 @@ export const trackSingleTarget = (page /* puppeteer Page */, logger) => __awaite
                     // EAT IT and carry on
                 }
                 else {
-                    logger.debug("ERROR getting PageGraph data", error);
+                    logger.debug('ERROR getting PageGraph data', error);
                     throw error;
                 }
             }
         }),
-        dump: (_) => __awaiter(void 0, void 0, void 0, function* () {
+        dump: () => __awaiter(void 0, void 0, void 0, function* () {
             if (finalPageGraph) {
                 return finalPageGraph;
             }
             else {
-                throw Error("no PageGraph data available for sole tracked target");
+                throw Error('no PageGraph data available for sole tracked target');
             }
         })
     });

@@ -63,6 +63,10 @@ parser.addArgument(['--track'], {
     choices: ['single', 'multi'],
     defaultValue: defaultTrackStrategy
 });
+parser.addArgument(['--proxy-server'], {
+    help: 'Use an HTTP/SOCKS proxy at URL for all navigations',
+    metavar: 'URL'
+});
 const rawArgs = parser.parseArgs();
 const [isValid, errorOrArgs] = validate(rawArgs);
 if (!isValid) {

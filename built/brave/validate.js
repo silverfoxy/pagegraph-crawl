@@ -68,8 +68,17 @@ export const validate = (rawArgs) => {
         persistProfilePath: undefined,
         interactive,
         userAgent,
-        trackerFactory: getTrackerFactoryForStrategy(rawArgs.track)
+        trackerFactory: getTrackerFactoryForStrategy(rawArgs.track),
+        proxyServer: undefined
     };
+    if (rawArgs.proxy_server) {
+        try {
+            validatedArgs.proxyServer = new URL(rawArgs.proxy_server);
+        }
+        catch (err) {
+            return [false, `invalid proxy-server: ${err.toString()}`];
+        }
+    }
     if (rawArgs.existing_profile && rawArgs.persist_profile) {
         return [false, 'Cannot specify both that you want to use an existing ' +
                 'profile, and that you want to persist a new profile.'];
