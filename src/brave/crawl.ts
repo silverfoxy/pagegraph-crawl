@@ -48,21 +48,24 @@ export const graphsForUrl = async (args: CrawlArgs, url: Url): Promise<string> =
   try {
     logger.debug('Launching puppeteer with args: ', puppeteerArgs)
     const browser = await puppeteerLib.launch(puppeteerArgs)
-    const tracker = await args.trackerFactory(browser, logger)
-    const page = await browser.newPage()
-
-    if (args.userAgent) {
-      await page.setUserAgent(args.userAgent)
-    }
-
-    logger.debug(`Navigating to ${url}`)
-    await page.goto(url)
-
-    const waitTimeMs = args.seconds * 1000
-    logger.debug(`Waiting for ${waitTimeMs}ms`)
-    await page.waitFor(waitTimeMs)
-
     try {
+      const tracker = await args.trackerFactory(browser, logger)
+      const page = await browser.newPage()
+      page.on('error', (error: Error) => {
+        throw error
+      })
+
+      if (args.userAgent) {
+        await page.setUserAgent(args.userAgent)
+      }
+
+      logger.debug(`Navigating to ${url}`)
+      await page.goto(url)
+
+      const waitTimeMs = args.seconds * 1000
+      logger.debug(`Waiting for ${waitTimeMs}ms`)
+      await page.waitFor(waitTimeMs)
+
       await tracker.close()
       rawOutput = await tracker.dump(args.outputPath)
     } finally {

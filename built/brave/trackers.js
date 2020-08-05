@@ -67,7 +67,7 @@ export const trackAllTargetsNew = (browser /* puppeteer Browser */, logger) => _
             return;
         }
         console.log('new session', sessionId, targetType);
-        if (targetType === "page") {
+        if (targetType === 'page') {
             pageSet.add(cdp);
         }
         if (['page', 'iframe'].includes(targetType)) {
@@ -97,7 +97,7 @@ export const trackAllTargetsNew = (browser /* puppeteer Browser */, logger) => _
     return Object.freeze({
         close: () => __awaiter(void 0, void 0, void 0, function* () {
             yield Promise.all(Array.from(pageSet.values()).map((pageCdp /* puppeteer CDPSession */) => __awaiter(void 0, void 0, void 0, function* () {
-                yield pageCdp.send('Page.navigate', { url: "about:blank" });
+                yield pageCdp.send('Page.navigate', { url: 'about:blank' });
             })));
         }),
         dump: () => __awaiter(void 0, void 0, void 0, function* () {
@@ -251,24 +251,158 @@ export const trackAllTargets = (browser /* puppeteer Browser */, logger) => __aw
         })
     });
 });
-export const trackSingleTarget = (page /* puppeteer Page */, logger) => __awaiter(void 0, void 0, void 0, function* () {
-    const target = page.target();
-    const client = yield target.createCDPSession();
-    let finalPageGraph;
+const targetInternals = (target /* puppeteer Target */) => {
+    const { _targetId: targetId, _targetInfo: { type: targetType } } = target;
+    return { targetId, targetType };
+};
+class PageGraphTracker {
+    constructor(browser /* puppeteer Browser */, logger) {
+        this._logger = logger;
+        this._remoteFrames = new Map();
+        this._buggedPages = new Map();
+        this._pendingGraphs = new Map();
+        this._emittedGraphs = [];
+        browser.on('targetcreated', this._onTargetCreated.bind(this));
+        browser.on('targetchanged', (target /* puppeteer Target */) => {
+            const { targetId, targetType } = targetInternals(target);
+            if (targetType === 'iframe') {
+                this._logger.debug(`remote iframe ${targetId} changed: url=${target.url()}`);
+            }
+        });
+        browser.on('targetdestroyed', this._onTargetDestroyed.bind(this));
+    }
+    get firstMainFrameId() {
+        return this._firstMainFrameId || '';
+    }
+    shutdown() {
+        return __awaiter(this, void 0, void 0, function* () {
+            this._logger.debug(`shutting down ${this._remoteFrames.size} remote iframe(s)...`);
+            yield Promise.all(Array.from(this._remoteFrames.entries()).reverse().map(([frameId, target]) => __awaiter(this, void 0, void 0, function* () {
+                const waitPromise = this._waitForNext(frameId);
+                try {
+                    const client = yield target.createCDPSession();
+                    yield client.send('Page.navigate', { url: 'about:blank' });
+                    yield client.detach();
+                    return waitPromise;
+                }
+                catch (error) {
+                    console.error(error);
+                }
+            })));
+            this._logger.debug(`shutting down ${this._buggedPages.size} page(s)...`);
+            yield Promise.all(Array.from(this._buggedPages.keys()).map((target) => __awaiter(this, void 0, void 0, function* () {
+                const { targetId } = targetInternals(target);
+                const waitPromise = this._waitForNext(targetId);
+                try {
+                    const page = yield target.page();
+                    yield page.goto('about:blank');
+                    return waitPromise;
+                }
+                catch (error) {
+                    console.error(error);
+                }
+            })));
+            return this._emittedGraphs;
+        });
+    }
+    _waitForNext(frameId) {
+        const waiter = this._pendingGraphs.get(frameId) || {};
+        if (!waiter.promise) {
+            waiter.promise = new Promise(resolve => {
+                waiter.trigger = resolve;
+                this._pendingGraphs.set(frameId, waiter);
+            });
+        }
+        return waiter.promise;
+    }
+    _onTargetCreated(target /* puppeteer Target */) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const { targetId, targetType } = targetInternals(target);
+            if (targetType === 'iframe') {
+                this._logger.debug(`new remote iframe ${targetId}`);
+                this._remoteFrames.set(targetId, target);
+            }
+            else if (targetType === 'page') {
+                const page = yield target.page();
+                page.on('frameattached', (frame /* puppeteer Frame */) => {
+                    this._logger.debug(frame._id, frame._parentFrame && frame._parentFrame._id);
+                });
+                if (!this._firstMainFrameId) {
+                    this._firstMainFrameId = page.mainFrame()._id;
+                }
+                const client = yield target.createCDPSession().catch((error) => console.error(error));
+                client.on('Page.finalPageGraph', this._onFinalPageGraph.bind(this));
+                this._buggedPages.set(target, client);
+            }
+        });
+    }
+    _onFinalPageGraph(event) {
+        return __awaiter(this, void 0, void 0, function* () {
+            this._logger.debug(`Page.finalPageGraph { frameId: ${event.frameId}}`);
+            this._emittedGraphs.push(event);
+            const waiter = this._pendingGraphs.get(event.frameId);
+            if (waiter && waiter.trigger) {
+                this._logger.debug(`triggering waiter on ${event.frameId}`);
+                waiter.trigger();
+                this._pendingGraphs.delete(event.frameId);
+            }
+        });
+    }
+    _onTargetDestroyed(target /* puppeteer Target */) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const { targetId, targetType } = targetInternals(target);
+            if (targetType === 'iframe') {
+                this._logger.debug(`destroyed remote iframe ${targetId}`);
+                this._remoteFrames.delete(targetId);
+            }
+            else if (targetType === 'page') {
+                const client = this._buggedPages.get(target);
+                this._buggedPages.delete(target);
+                if (client) {
+                    yield client.detach().catch((error) => console.error(error));
+                }
+            }
+        });
+    }
+}
+export const trackSingleTarget = (browser /* puppeteer Page */, logger) => __awaiter(void 0, void 0, void 0, function* () {
+    //const tracker = new PageGraphTracker(browser, logger)
+    let pageGraphEvents = [];
+    const pageSet = new Set();
+    browser.on('targetcreated', (target) => __awaiter(void 0, void 0, void 0, function* () {
+        if (target.type() === "page") {
+            const page = yield target.page();
+            pageSet.add(page);
+            const client = yield target.createCDPSession();
+            client.on('Page.finalPageGraph', (event) => {
+                logger.debug(`finalpageGraph { frameId: ${event.frameId}, size: ${event.data.length}}`);
+                pageGraphEvents.push(event);
+            });
+        }
+    }));
+    browser.on('targetdestroyed', (target) => __awaiter(void 0, void 0, void 0, function* () {
+        if (target.type() === "page") {
+            try {
+                const page = yield target.page();
+                pageSet.delete(page);
+            }
+            catch (error) {
+                console.error(`page disappeared during target destruction`);
+            }
+        }
+    }));
     return Object.freeze({
         close: () => __awaiter(void 0, void 0, void 0, function* () {
             try {
-                const params = yield client.send('Page.generatePageGraph');
-                finalPageGraph = params.data;
+                yield Promise.all(Array.from(pageSet.values()).map((page) => page.goto("about:blank")));
             }
             catch (error) {
-                const currentUrl = target.url();
                 if (isSessionClosedError(error)) {
-                    logger.debug(`session to target for ${currentUrl} dropped`);
+                    logger.debug('session dropped');
                     // EAT IT and carry on
                 }
                 else if (isNotHTMLPageGraphError(error)) {
-                    logger.debug(`Was not able to fetch PageGraph data from target for ${currentUrl}`);
+                    logger.debug('Was not able to fetch PageGraph data from target');
                     // EAT IT and carry on
                 }
                 else {
@@ -277,13 +411,17 @@ export const trackSingleTarget = (page /* puppeteer Page */, logger) => __awaite
                 }
             }
         }),
-        dump: () => __awaiter(void 0, void 0, void 0, function* () {
-            if (finalPageGraph) {
-                return finalPageGraph;
-            }
-            else {
-                throw Error('no PageGraph data available for sole tracked target');
-            }
+        dump: (outputPath) => __awaiter(void 0, void 0, void 0, function* () {
+            const outputDir = pathLib.dirname(outputPath);
+            yield Promise.all(pageGraphEvents.map((event) => {
+                return new Promise(resolve => {
+                    const filename = pathLib.join(outputDir, `page_graph_${event.frameId}.graphml`);
+                    fsLib.writeFile(filename, event.data, resolve);
+                });
+            }));
+            return JSON.stringify({
+                firstMainFrame: "wat"
+            });
         })
     });
 });

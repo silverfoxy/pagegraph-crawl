@@ -48,17 +48,20 @@ export const graphsForUrl = (args, url) => __awaiter(void 0, void 0, void 0, fun
     try {
         logger.debug('Launching puppeteer with args: ', puppeteerArgs);
         const browser = yield puppeteerLib.launch(puppeteerArgs);
-        const tracker = yield args.trackerFactory(browser, logger);
-        const page = yield browser.newPage();
-        if (args.userAgent) {
-            yield page.setUserAgent(args.userAgent);
-        }
-        logger.debug(`Navigating to ${url}`);
-        yield page.goto(url);
-        const waitTimeMs = args.seconds * 1000;
-        logger.debug(`Waiting for ${waitTimeMs}ms`);
-        yield page.waitFor(waitTimeMs);
         try {
+            const tracker = yield args.trackerFactory(browser, logger);
+            const page = yield browser.newPage();
+            page.on('error', (error) => {
+                throw error;
+            });
+            if (args.userAgent) {
+                yield page.setUserAgent(args.userAgent);
+            }
+            logger.debug(`Navigating to ${url}`);
+            yield page.goto(url);
+            const waitTimeMs = args.seconds * 1000;
+            logger.debug(`Waiting for ${waitTimeMs}ms`);
+            yield page.waitFor(waitTimeMs);
             yield tracker.close();
             rawOutput = yield tracker.dump(args.outputPath);
         }

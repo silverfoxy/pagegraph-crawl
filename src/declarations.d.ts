@@ -91,3 +91,12 @@ interface TargetTracker {
 interface TargetTrackerFactory {
   (page: any /* puppeteer Page */, logger: Logger): Promise<TargetTracker>
 }
+
+interface PageGraphTrackerWaitTrigger {
+  (): void
+}
+
+interface PageGraphTrackerWaiter {
+  trigger?: PageGraphTrackerWaitTrigger,
+  promise?: Promise<void>,
+}

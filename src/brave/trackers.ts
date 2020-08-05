@@ -68,7 +68,7 @@ export const trackAllTargetsNew = async (browser: any /* puppeteer Browser */, l
       return
     }
     console.log('new session', sessionId, targetType)
-    if (targetType === "page") {
+    if (targetType === 'page') {
       pageSet.add(cdp)
     }
 
@@ -101,7 +101,7 @@ export const trackAllTargetsNew = async (browser: any /* puppeteer Browser */, l
   return Object.freeze({
     close: async () => {
       await Promise.all(Array.from(pageSet.values()).map(async (pageCdp: any /* puppeteer CDPSession */) => {
-        await pageCdp.send('Page.navigate', { url: "about:blank" })
+        await pageCdp.send('Page.navigate', { url: 'about:blank' })
       }))
     },
     dump: async () => {
@@ -258,23 +258,172 @@ export const trackAllTargets = async (browser: any /* puppeteer Browser */, logg
   })
 }
 
-export const trackSingleTarget = async (page: any /* puppeteer Page */, logger: Logger): Promise<TargetTracker> => {
-  const target = page.target()
-  const client = await target.createCDPSession()
-  let finalPageGraph: string | undefined
+const targetInternals = (target: any /* puppeteer Target */) => {
+  const {
+    _targetId: targetId,
+    _targetInfo: {
+      type: targetType
+    }
+  } = target
+  return { targetId, targetType }
+}
+
+class PageGraphTracker {
+  _logger: Logger
+  _remoteFrames: Map<string, any>
+  _buggedPages: Map<any, any>
+  _pendingGraphs: Map<string, PageGraphTrackerWaiter>
+  _emittedGraphs: PageFinalPageGraph[]
+  _firstMainFrameId: string | undefined
+
+  constructor (browser: any /* puppeteer Browser */, logger: Logger) {
+    this._logger = logger
+    this._remoteFrames = new Map()
+    this._buggedPages = new Map()
+    this._pendingGraphs = new Map()
+    this._emittedGraphs = []
+
+    browser.on('targetcreated', this._onTargetCreated.bind(this))
+    browser.on('targetchanged', (target: any /* puppeteer Target */) => {
+      const { targetId, targetType } = targetInternals(target)
+      if (targetType === 'iframe') {
+        this._logger.debug(`remote iframe ${targetId} changed: url=${target.url()}`)
+      }
+    })
+    browser.on('targetdestroyed', this._onTargetDestroyed.bind(this))
+  }
+
+  get firstMainFrameId (): string {
+    return this._firstMainFrameId || ''
+  }
+
+  async shutdown () {
+    this._logger.debug(`shutting down ${this._remoteFrames.size} remote iframe(s)...`)
+    await Promise.all(Array.from(this._remoteFrames.entries()).reverse().map(async ([frameId, target]) => {
+      const waitPromise = this._waitForNext(frameId)
+      try {
+        const client = await target.createCDPSession()
+        await client.send('Page.navigate', { url: 'about:blank' })
+        await client.detach()
+        return waitPromise
+      } catch (error) {
+        console.error(error)
+      }
+    }))
+
+    this._logger.debug(`shutting down ${this._buggedPages.size} page(s)...`)
+    await Promise.all(Array.from(this._buggedPages.keys()).map(async target => {
+      const { targetId } = targetInternals(target)
+      const waitPromise = this._waitForNext(targetId)
+      try {
+        const page = await target.page()
+        await page.goto('about:blank')
+        return waitPromise
+      } catch (error) {
+        console.error(error)
+      }
+    }))
+
+    return this._emittedGraphs
+  }
+
+  _waitForNext (frameId: string): Promise<void> {
+    const waiter = this._pendingGraphs.get(frameId) || {}
+    if (!waiter.promise) {
+      waiter.promise = new Promise(resolve => {
+        waiter.trigger = resolve
+        this._pendingGraphs.set(frameId, waiter)
+      })
+    }
+    return waiter.promise
+  }
+
+  async _onTargetCreated (target: any /* puppeteer Target */) {
+    const { targetId, targetType } = targetInternals(target)
+    if (targetType === 'iframe') {
+      this._logger.debug(`new remote iframe ${targetId}`)
+      this._remoteFrames.set(targetId, target)
+    } else if (targetType === 'page') {
+      const page = await target.page()
+      page.on('frameattached', (frame: any /* puppeteer Frame */) => {
+        this._logger.debug(frame._id, frame._parentFrame && frame._parentFrame._id)
+      })
+
+      if (!this._firstMainFrameId) {
+        this._firstMainFrameId = page.mainFrame()._id
+      }
+
+      const client = await target.createCDPSession().catch((error: Error) => console.error(error))
+      client.on('Page.finalPageGraph', this._onFinalPageGraph.bind(this))
+      this._buggedPages.set(target, client)
+    }
+  }
+
+  async _onFinalPageGraph (event: PageFinalPageGraph) {
+    this._logger.debug(`Page.finalPageGraph { frameId: ${event.frameId}}`)
+    this._emittedGraphs.push(event)
+
+    const waiter = this._pendingGraphs.get(event.frameId)
+    if (waiter && waiter.trigger) {
+      this._logger.debug(`triggering waiter on ${event.frameId}`)
+      waiter.trigger()
+      this._pendingGraphs.delete(event.frameId)
+    }
+  }
+
+  async _onTargetDestroyed (target: any /* puppeteer Target */) {
+    const { targetId, targetType } = targetInternals(target)
+    if (targetType === 'iframe') {
+      this._logger.debug(`destroyed remote iframe ${targetId}`)
+      this._remoteFrames.delete(targetId)
+    } else if (targetType === 'page') {
+      const client = this._buggedPages.get(target)
+      this._buggedPages.delete(target)
+      if (client) {
+        await client.detach().catch((error: Error) => console.error(error))
+      }
+    }
+  }
+}
+
+export const trackSingleTarget = async (browser: any /* puppeteer Page */, logger: Logger): Promise<TargetTracker> => {
+  //const tracker = new PageGraphTracker(browser, logger)
+  let pageGraphEvents: PageFinalPageGraph[] = []
+
+  const pageSet = new Set()
+  browser.on('targetcreated', async (target: any) => {
+    if (target.type() === "page") {
+      const page = await target.page()
+      pageSet.add(page)
+
+      const client = await target.createCDPSession()
+      client.on('Page.finalPageGraph', (event: PageFinalPageGraph) => {
+        logger.debug(`finalpageGraph { frameId: ${event.frameId}, size: ${event.data.length}}`)
+        pageGraphEvents.push(event)
+      })
+    }
+  })
+  browser.on('targetdestroyed', async (target: any) => {
+    if (target.type() === "page") {
+      try {
+        const page = await target.page()
+        pageSet.delete(page)
+      } catch (error) {
+        console.error(`page disappeared during target destruction`)
+      }
+    }
+  })
 
   return Object.freeze({
     close: async (): Promise<void> => {
       try {
-        const params: PageFinalPageGraph = await client.send('Page.generatePageGraph')
-        finalPageGraph = params.data
+        await Promise.all(Array.from(pageSet.values()).map((page: any) => page.goto("about:blank")))
       } catch (error) {
-        const currentUrl = target.url()
         if (isSessionClosedError(error)) {
-          logger.debug(`session to target for ${currentUrl} dropped`)
+          logger.debug('session dropped')
           // EAT IT and carry on
         } else if (isNotHTMLPageGraphError(error)) {
-          logger.debug(`Was not able to fetch PageGraph data from target for ${currentUrl}`)
+          logger.debug('Was not able to fetch PageGraph data from target')
           // EAT IT and carry on
         } else {
           logger.debug('ERROR getting PageGraph data', error)
@@ -282,12 +431,17 @@ export const trackSingleTarget = async (page: any /* puppeteer Page */, logger: 
         }
       }
     },
-    dump: async (): Promise<string> => {
-      if (finalPageGraph) {
-        return finalPageGraph
-      } else {
-        throw Error('no PageGraph data available for sole tracked target')
-      }
+    dump: async (outputPath: string): Promise<string> => {
+      const outputDir = pathLib.dirname(outputPath)
+      await Promise.all(pageGraphEvents.map((event: PageFinalPageGraph) => {
+        return new Promise(resolve => {
+          const filename = pathLib.join(outputDir, `page_graph_${event.frameId}.graphml`)
+          fsLib.writeFile(filename, event.data, resolve)
+        })
+      }))
+      return JSON.stringify({
+        firstMainFrame: "wat"
+      })
     }
   })
 }
