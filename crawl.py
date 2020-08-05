@@ -12,6 +12,7 @@ REPLACEX = re.compile(r"[^-_a-zA-Z0-9]")
 
 TIME_LIMIT = 15.0 # seconds
 
+TAG = os.environ.get("TAG")
 SHIELDS = os.environ.get("SHIELDS", "down")
 
 
@@ -24,7 +25,7 @@ def main(argv):
         hostname = urlparse(url).hostname
         munged_url = REPLACEX.sub("_", url)[:64]
         random_tag = hashlib.md5(url.encode('utf8')).hexdigest()
-        collection_dir = os.path.join(SHIELDS, hostname, f"{munged_url}.{random_tag}")
+        collection_dir = os.path.join(TAG, hostname, f"{munged_url}.{random_tag}")
 
         os.makedirs(collection_dir, exist_ok=False)
         log_filename = os.path.join(collection_dir, "crawl.log")
