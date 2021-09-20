@@ -42,6 +42,7 @@ export const puppeteerConfigForArgs = (args) => {
         defaultViewport: null,
         args: [
             '--disable-brave-update',
+            '--no-sandbox',
             '--user-data-dir=' + pathForProfile
         ],
         executablePath: args.executablePath,
